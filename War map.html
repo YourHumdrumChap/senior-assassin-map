@@ -44,26 +44,26 @@
 let currentUser = localStorage.getItem('currentUser');
 let pendingCustomMarker = null;
 
+if (!currentUser) {
+  window.location.href = 'login.html';
+}
+
 const localMarkersKey = 'mapMarkers';
 
 function loadLocalContent() {
   try {
     const raw = localStorage.getItem(localMarkersKey);
-    if (!raw) return { markers: [] };
+    if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.markers)) return { markers: [] };
+    if (!parsed || !Array.isArray(parsed.markers)) return null;
     return parsed;
   } catch {
-    return { markers: [] };
+    return null;
   }
 }
 
 function saveLocalContent(content) {
   localStorage.setItem(localMarkersKey, JSON.stringify(content));
-}
-
-if (!currentUser) {
-  window.location.href = 'login.html';
 }
 
 function escapeHtml(text) {
@@ -142,7 +142,24 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 let markersLayer = L.layerGroup().addTo(map);
 
 async function loadMarkers() {
-  const content = loadLocalContent();
+  // Prefer local markers (created in this browser)
+  let content = loadLocalContent();
+
+  // Otherwise try reading map-data.json from same origin
+  if (!content) {
+    try {
+      const response = await fetch('map-data.json', { cache: 'no-store' });
+      if (response.ok) {
+        const parsed = await response.json();
+        content = parsed && Array.isArray(parsed.markers) ? parsed : { markers: [] };
+      } else {
+        content = { markers: [] };
+      }
+    } catch {
+      content = { markers: [] };
+    }
+    saveLocalContent(content);
+  }
 
   markersLayer.clearLayers();
 
@@ -194,7 +211,7 @@ async function saveMarker(lat, lng, options = null) {
     return false;
   }
 
-  const content = loadLocalContent();
+  const content = loadLocalContent() || { markers: [] };
 
   const chosenColor = (options && options.color) ? options.color : (players[currentUser]?.color || 'gray');
   const title = (options && typeof options.title === 'string') ? options.title : '';
@@ -217,7 +234,7 @@ async function saveMarker(lat, lng, options = null) {
 
 async function deleteMarker(index) {
   if (!currentUser) return alert("Please login first");
-  const content = loadLocalContent();
+  const content = loadLocalContent() || { markers: [] };
 
   if (!content?.markers?.[index]) return;
   if (content.markers[index].user !== currentUser) return alert('You can only delete your own markers');
@@ -232,12 +249,13 @@ async function editMarker(index) {
   const ok = confirm('Update timestamp to now?');
   if (!ok) return;
 
-  const content = loadLocalContent();
+  const content = loadLocalContent() || { markers: [] };
 
   if (!content?.markers?.[index]) return;
   if (content.markers[index].user !== currentUser) return alert('You can only edit your own markers');
 
   content.markers[index].timestamp = Date.now();
+
   saveLocalContent(content);
   loadMarkers();
 }

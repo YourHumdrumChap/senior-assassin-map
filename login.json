@@ -1,0 +1,10 @@
+{
+  "players": {
+    "alpha": { "password": "1234", "color": "red" },
+    "bravo": { "password": "1234", "color": "blue" },
+    "charlie": { "password": "1234", "color": "green" },
+    "delta": { "password": "1234", "color": "purple" },
+    "echo": { "password": "1234", "color": "orange" },
+    "foxtrot": { "password": "1234", "color": "black" }
+  }
+}

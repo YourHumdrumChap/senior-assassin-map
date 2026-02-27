@@ -49,7 +49,7 @@
 <script>
 const mapPage = 'War map.html';
 
-const players = {
+const defaultPlayers = {
   "alpha": { password: "1234", color: "red" },
   "bravo": { password: "1234", color: "blue" },
   "charlie": { password: "1234", color: "green" },
@@ -58,30 +58,53 @@ const players = {
   "foxtrot": { password: "1234", color: "black" }
 };
 
-function loadStoredPlayers() {
-  const stored = localStorage.getItem('extraPlayers');
-  if (!stored) return;
+let players = null;
+
+const localPlayersKey = 'loginPlayers';
+
+function loadLocalPlayers() {
   try {
-    const obj = JSON.parse(stored);
-    for (const u in obj) players[u] = obj[u];
-  } catch (e) {
-    console.warn('failed to parse saved players', e);
+    const raw = localStorage.getItem(localPlayersKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
   }
 }
 
-function saveStoredPlayers() {
-  const extras = {};
-  for (const u in players) {
-    if (!['alpha','bravo','charlie','delta','echo','foxtrot'].includes(u)) {
-      extras[u] = players[u];
-    }
+function saveLocalPlayers(obj) {
+  localStorage.setItem(localPlayersKey, JSON.stringify(obj));
+}
+
+async function loadPlayers() {
+  // 1) Try local overrides first (created accounts)
+  const local = loadLocalPlayers();
+  if (local) {
+    players = { ...defaultPlayers, ...local };
+    return;
   }
-  localStorage.setItem('extraPlayers', JSON.stringify(extras));
+
+  // 2) Try reading login.json from same origin (works on GitHub Pages / local server)
+  try {
+    const response = await fetch('login.json', { cache: 'no-store' });
+    if (response.ok) {
+      const parsed = await response.json();
+      const fromFile = parsed?.players && typeof parsed.players === 'object' ? parsed.players : {};
+      players = { ...defaultPlayers, ...fromFile };
+      return;
+    }
+  } catch {
+    // ignored
+  }
+
+  players = { ...defaultPlayers };
 }
 
 const colorPool = ['red','blue','green','purple','orange','black','yellow','cyan','magenta'];
 function pickColor() {
-  const used = new Set(Object.values(players).map(p => p.color));
+  const used = new Set(Object.values(players || {}).map(p => p.color));
   const available = colorPool.filter(c => !used.has(c));
   return available.length ? available[Math.floor(Math.random() * available.length)] : 'gray';
 }
@@ -96,9 +119,17 @@ function showLogin() {
   document.getElementById('loginSection').style.display = 'block';
 }
 
-function login() {
+async function login() {
   const u = document.getElementById('username').value.trim();
   const p = document.getElementById('password').value;
+
+  try {
+    if (!players) await loadPlayers();
+  } catch (e) {
+    console.warn(e);
+    alert(String(e.message || e));
+    return;
+  }
 
   if (players[u] && players[u].password === p) {
     localStorage.setItem('currentUser', u);
@@ -108,22 +139,28 @@ function login() {
   }
 }
 
-function register() {
+async function register() {
   const u = document.getElementById('newUsername').value.trim();
   const p = document.getElementById('newPassword').value;
   if (!u || !p) return alert('enter username and password');
-  if (players[u]) return alert('username already exists');
 
-  players[u] = { password: p, color: pickColor() };
-  saveStoredPlayers();
-
-  alert('account created, please login');
-  showLogin();
-  document.getElementById('username').value = u;
-  document.getElementById('password').value = '';
+  try {
+    if (!players) await loadPlayers();
+    if (players[u]) return alert('username already exists');
+    players[u] = { password: p, color: pickColor() };
+    // Persist locally (no tokens/backends)
+    const local = loadLocalPlayers() || {};
+    local[u] = players[u];
+    saveLocalPlayers(local);
+    alert('account created, please login');
+    showLogin();
+    document.getElementById('username').value = u;
+    document.getElementById('password').value = '';
+  } catch (e) {
+    console.warn(e);
+    alert(String(e.message || e));
+  }
 }
-
-loadStoredPlayers();
 
 // If already logged in, jump straight to the map.
 const existing = localStorage.getItem('currentUser');
