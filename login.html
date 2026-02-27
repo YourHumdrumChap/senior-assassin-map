@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Senior Assassin Login</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: #f6f6f6;
+    }
+    #controlPanel {
+      max-width: 360px;
+      margin: 48px auto;
+      background: white;
+      padding: 16px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      font-size: 14px;
+    }
+    input { width: 100%; margin: 8px 0; padding: 10px; box-sizing: border-box; }
+    button { width: 100%; margin-top: 8px; padding: 10px; }
+    .title { font-weight: 700; margin-bottom: 8px; }
+    .hint { font-size: 12px; color: #555; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+<div id="controlPanel">
+  <div id="loginSection">
+    <div class="title">Player Login</div>
+    <input id="username" placeholder="Username" autocomplete="username">
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+    <button onclick="login()">Login</button>
+    <button onclick="showRegister()">Create new account</button>
+    <div class="hint">After logging in you’ll be sent to the map.</div>
+  </div>
+
+  <div id="registerSection" style="display:none;">
+    <div class="title">Create Account</div>
+    <input id="newUsername" placeholder="Username" autocomplete="username">
+    <input id="newPassword" type="password" placeholder="Password" autocomplete="new-password">
+    <button onclick="register()">Register</button>
+    <button onclick="showLogin()">Back to login</button>
+  </div>
+</div>
+
+<script>
+const mapPage = 'War map.html';
+
+const players = {
+  "alpha": { password: "1234", color: "red" },
+  "bravo": { password: "1234", color: "blue" },
+  "charlie": { password: "1234", color: "green" },
+  "delta": { password: "1234", color: "purple" },
+  "echo": { password: "1234", color: "orange" },
+  "foxtrot": { password: "1234", color: "black" }
+};
+
+function loadStoredPlayers() {
+  const stored = localStorage.getItem('extraPlayers');
+  if (!stored) return;
+  try {
+    const obj = JSON.parse(stored);
+    for (const u in obj) players[u] = obj[u];
+  } catch (e) {
+    console.warn('failed to parse saved players', e);
+  }
+}
+
+function saveStoredPlayers() {
+  const extras = {};
+  for (const u in players) {
+    if (!['alpha','bravo','charlie','delta','echo','foxtrot'].includes(u)) {
+      extras[u] = players[u];
+    }
+  }
+  localStorage.setItem('extraPlayers', JSON.stringify(extras));
+}
+
+const colorPool = ['red','blue','green','purple','orange','black','yellow','cyan','magenta'];
+function pickColor() {
+  const used = new Set(Object.values(players).map(p => p.color));
+  const available = colorPool.filter(c => !used.has(c));
+  return available.length ? available[Math.floor(Math.random() * available.length)] : 'gray';
+}
+
+function showRegister() {
+  document.getElementById('loginSection').style.display = 'none';
+  document.getElementById('registerSection').style.display = 'block';
+}
+
+function showLogin() {
+  document.getElementById('registerSection').style.display = 'none';
+  document.getElementById('loginSection').style.display = 'block';
+}
+
+function login() {
+  const u = document.getElementById('username').value.trim();
+  const p = document.getElementById('password').value;
+
+  if (players[u] && players[u].password === p) {
+    localStorage.setItem('currentUser', u);
+    window.location.href = mapPage;
+  } else {
+    alert('Invalid login');
+  }
+}
+
+function register() {
+  const u = document.getElementById('newUsername').value.trim();
+  const p = document.getElementById('newPassword').value;
+  if (!u || !p) return alert('enter username and password');
+  if (players[u]) return alert('username already exists');
+
+  players[u] = { password: p, color: pickColor() };
+  saveStoredPlayers();
+
+  alert('account created, please login');
+  showLogin();
+  document.getElementById('username').value = u;
+  document.getElementById('password').value = '';
+}
+
+loadStoredPlayers();
+
+// If already logged in, jump straight to the map.
+const existing = localStorage.getItem('currentUser');
+if (existing) window.location.href = mapPage;
+</script>
+</body>
+</html>

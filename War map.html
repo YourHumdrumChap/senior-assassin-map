@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Senior Assassin Tactical Map</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    #map { height: 100vh; }
+    #controlPanel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+      background: white;
+      padding: 10px;
+      border-radius: 8px;
+      width: 220px;
+      font-size: 14px;
+    }
+    input { width: 100%; margin-bottom: 5px; }
+    button { width: 100%; margin-bottom: 5px; }
+  </style>
+</head>
+<body>
+
+<div id="controlPanel">
+  <div id="mapControls">
+    <b id="playerLabel"></b>
+    <button onclick="logout()">Logout</button>
+    <input type="password" id="tokenInput" placeholder="GitHub Token">
+    <button onclick="saveToken()">Save Token</button>
+    <button onclick="testToken()">Test Token</button>
+    <div id="tokenStatus" style="font-size:12px;color:#555;margin-bottom:6px;"></div>
+    <input id="markerTitleInput" placeholder="Marker title (optional)">
+    <input id="markerColorInput" type="color" value="#ff0000">
+    <button onclick="beginAddCustomMarker()">Add Marker</button>
+    <div id="addMarkerStatus" style="font-size:12px;color:#555;margin-bottom:6px;"></div>
+    <button onclick="toggleHeatmap()">Toggle Heatmap</button>
+    <button onclick="toggle24hr()">Toggle 24h Filter</button>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+
+<script>
+const defaultRepoOwner = "YOUR_GITHUB_USERNAME";
+const defaultRepoName = "senior-assassin-map";
+const filePath = "map-data.json";
+
+let githubToken = localStorage.getItem("githubToken");
+let currentUser = localStorage.getItem('currentUser');
+let heatLayer = null;
+let showHeat = false;
+let filter24 = false;
+let pendingCustomMarker = null;
+
+function normalizeGitHubToken(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.toLowerCase().startsWith('bearer ')) return trimmed.slice(7).trim();
+  if (trimmed.toLowerCase().startsWith('token ')) return trimmed.slice(6).trim();
+  return trimmed;
+}
+
+githubToken = normalizeGitHubToken(githubToken);
+
+if (!currentUser) {
+  window.location.href = 'login.html';
+}
+
+function detectGitHubRepoFromPages() {
+  try {
+    // GitHub Pages URLs look like https://<owner>.github.io/<repo>/...
+    const host = window.location.hostname;
+    if (!host || !host.endsWith('github.io')) return null;
+
+    const owner = host.split('.')[0];
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    const repo = pathParts[0];
+    if (!owner || !repo) return null;
+    return { owner, repo };
+  } catch {
+    return null;
+  }
+}
+
+const detected = detectGitHubRepoFromPages();
+const repoOwner = detected?.owner || defaultRepoOwner;
+const repoName = detected?.repo || defaultRepoName;
+
+function apiUrlForContents(path) {
+  const safePath = String(path)
+    .split('/')
+    .map(seg => encodeURIComponent(seg))
+    .join('/');
+  return `https://api.github.com/repos/${repoOwner}/${repoName}/contents/${safePath}`;
+}
+
+function buildAuthHeaders(scheme, extra = {}) {
+  const headers = { ...extra };
+  if (githubToken) headers.Authorization = `${scheme} ${githubToken}`;
+  return headers;
+}
+
+async function githubFetch(url, init = {}) {
+  const baseHeaders = {
+    'Accept': 'application/vnd.github+json',
+    ...(init.headers || {})
+  };
+
+  // First try Bearer (best for fine-grained PATs), then fall back to token.
+  const schemes = githubToken ? ['Bearer', 'token'] : [null];
+  let lastResponse = null;
+
+  for (const scheme of schemes) {
+    const headers = scheme ? buildAuthHeaders(scheme, baseHeaders) : baseHeaders;
+    const response = await fetch(url, { ...init, headers });
+    lastResponse = response;
+
+    // Only retry on explicit auth failure.
+    if (response.status !== 401) return response;
+  }
+
+  return lastResponse;
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+const players = {
+  "alpha": { password: "1234", color: "red" },
+  "bravo": { password: "1234", color: "blue" },
+  "charlie": { password: "1234", color: "green" },
+  "delta": { password: "1234", color: "purple" },
+  "echo": { password: "1234", color: "orange" },
+  "foxtrot": { password: "1234", color: "black" }
+};
+
+// load any saved players from localStorage
+function loadStoredPlayers() {
+  const stored = localStorage.getItem('extraPlayers');
+  if (stored) {
+    try {
+      const obj = JSON.parse(stored);
+      for (const u in obj) {
+        players[u] = obj[u];
+      }
+    } catch (e) {
+      console.warn('failed to parse saved players', e);
+    }
+  }
+}
+
+// persist new accounts
+function saveStoredPlayers() {
+  const extras = {};
+  for (const u in players) {
+    if (!['alpha','bravo','charlie','delta','echo','foxtrot'].includes(u)) {
+      extras[u] = players[u];
+    }
+  }
+  localStorage.setItem('extraPlayers', JSON.stringify(extras));
+}
+
+// simple color pool for new accounts
+const colorPool = [
+  'red','blue','green','purple','orange','black','yellow','cyan','magenta'
+];
+function pickColor() {
+  // pick random unused color
+  const used = new Set(Object.values(players).map(p=>p.color));
+  const available = colorPool.filter(c=>!used.has(c));
+  return available.length ? available[Math.floor(Math.random()*available.length)] : 'gray';
+}
+
+function logout() {
+  localStorage.removeItem('currentUser');
+  window.location.href = 'login.html';
+}
+
+// initialize stored players on load
+loadStoredPlayers();
+
+if (currentUser && document.getElementById('playerLabel')) {
+  document.getElementById('playerLabel').innerText = 'Logged in: ' + currentUser;
+}
+
+function saveToken() {
+  githubToken = normalizeGitHubToken(document.getElementById("tokenInput").value);
+  localStorage.setItem("githubToken", githubToken);
+  alert("Token saved!");
+  startPolling();
+}
+
+// prefill token input if saved
+if (githubToken) {
+  const tokenInput = document.getElementById('tokenInput');
+  if (tokenInput) tokenInput.value = githubToken;
+}
+
+async function testToken() {
+  const tokenStatus = document.getElementById('tokenStatus');
+  if (tokenStatus) tokenStatus.innerText = '';
+
+  if (!githubToken) return alert('Paste a token and click Save Token first');
+  try {
+    const res = await githubFetch('https://api.github.com/user', { method: 'GET' });
+    if (!res.ok) {
+      const txt = await res.text();
+      if (tokenStatus) tokenStatus.innerText = `Token failed (${res.status}).`;
+      alert(`Token failed (${res.status}).\n\n${txt}`);
+      return;
+    }
+    const user = await res.json();
+    if (tokenStatus) tokenStatus.innerText = `Token OK for: ${user.login}`;
+  } catch (e) {
+    console.warn(e);
+    if (tokenStatus) tokenStatus.innerText = 'Token test failed (network error).';
+    alert('Network error while testing token.');
+  }
+}
+
+var map = L.map('map', { zoomControl: false }).setView([40.5853, -105.0844], 13); // Fort Collins
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+let markersLayer = L.layerGroup().addTo(map);
+
+function toggleHeatmap() {
+  showHeat = !showHeat;
+  loadMarkers();
+}
+
+function toggle24hr() {
+  filter24 = !filter24;
+  loadMarkers();
+}
+
+async function loadMarkers() {
+  let content;
+  try {
+    const response = await githubFetch(apiUrlForContents(filePath), { method: 'GET' });
+
+    if (response.status === 404) {
+      // If the file doesn't exist yet, show an empty map.
+      content = { markers: [] };
+    } else if (!response.ok) {
+      const errorText = await response.text();
+      console.warn('Failed to load markers', response.status, errorText);
+      return;
+    } else {
+      const data = await response.json();
+      content = JSON.parse(atob(data.content));
+    }
+  } catch (e) {
+    console.warn('Failed to load markers', e);
+    return;
+  }
+
+  markersLayer.clearLayers();
+  if (heatLayer) map.removeLayer(heatLayer);
+
+  let heatPoints = [];
+
+  (content.markers || []).forEach((m, index) => {
+
+    if (filter24) {
+      if (Date.now() - m.timestamp > 86400000) return;
+    }
+
+    if (showHeat) {
+      heatPoints.push([m.lat, m.lng, 0.5]);
+    }
+
+    const icon = L.divIcon({
+      className: "",
+      html: `<div style="background:${m.color};width:14px;height:14px;border-radius:50%"></div>`
+    });
+
+    const marker = L.marker([m.lat, m.lng], { icon }).addTo(markersLayer);
+
+    const canEdit = currentUser && m.user === currentUser;
+    const titleLine = m.title ? `<b>${escapeHtml(m.title)}</b><br>` : '';
+    marker.bindPopup(`
+      ${titleLine}${escapeHtml(m.user)}<br>
+      ${new Date(m.timestamp).toLocaleString()}<br>
+      ${canEdit ? `<button onclick="editMarker(${index})">Edit</button>
+      <button onclick="deleteMarker(${index})">Delete</button>` : ''}
+    `);
+  });
+
+  if (showHeat) {
+    heatLayer = L.heatLayer(heatPoints).addTo(map);
+  }
+}
+
+async function updateFile(content, sha) {
+  const updatedContent = btoa(JSON.stringify(content, null, 2));
+  const res = await githubFetch(apiUrlForContents(filePath), {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      message: "Update map",
+      content: updatedContent,
+      sha: sha
+    })
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`GitHub update failed (${res.status}): ${errorText}`);
+  }
+}
+
+function beginAddCustomMarker() {
+  if (!currentUser) return (window.location.href = 'login.html');
+  if (!githubToken) return alert('Add your GitHub token first');
+
+  const title = (document.getElementById('markerTitleInput')?.value || '').trim();
+  const color = (document.getElementById('markerColorInput')?.value || '#ff0000').trim();
+  pendingCustomMarker = {
+    title,
+    color
+  };
+
+  const status = document.getElementById('addMarkerStatus');
+  if (status) status.innerText = 'Click the map to place your marker…';
+}
+
+async function saveMarker(lat, lng, options = null) {
+  if (!currentUser || !githubToken) {
+    alert("Login and add token first");
+    return false;
+  }
+
+  let data;
+  let content;
+  try {
+    const response = await githubFetch(apiUrlForContents(filePath), { method: 'GET' });
+
+    if (response.status === 404) {
+      data = { sha: undefined };
+      content = { markers: [] };
+    } else if (!response.ok) {
+      const errorText = await response.text();
+      alert(`Failed to read marker file from GitHub (${response.status}).\n\n${errorText}`);
+      return false;
+    } else {
+      data = await response.json();
+      if (!data?.content) {
+        alert('GitHub response missing file content.');
+        return false;
+      }
+      content = JSON.parse(atob(data.content));
+    }
+  } catch (e) {
+    console.warn(e);
+    alert('Network error talking to GitHub.');
+    return false;
+  }
+
+  const chosenColor = (options && options.color) ? options.color : (players[currentUser]?.color || 'gray');
+  const title = (options && typeof options.title === 'string') ? options.title : '';
+
+  content.markers.push({
+    lat,
+    lng,
+    user: currentUser,
+    title,
+    color: chosenColor,
+    timestamp: Date.now()
+  });
+
+  try {
+    await updateFile(content, data.sha);
+    loadMarkers();
+    const status = document.getElementById('addMarkerStatus');
+    if (status) status.innerText = '';
+    return true;
+  } catch (e) {
+    console.warn(e);
+    alert('Failed to save marker to GitHub. Check your token permissions.');
+    return false;
+  }
+}
+
+async function deleteMarker(index) {
+  if (!currentUser || !githubToken) return alert("Login and add token first");
+
+  const response = await githubFetch(apiUrlForContents(filePath), { method: 'GET' });
+  const data = await response.json();
+  const content = JSON.parse(atob(data.content));
+
+  if (!content?.markers?.[index]) return;
+  if (content.markers[index].user !== currentUser) return alert('You can only delete your own markers');
+
+  content.markers.splice(index, 1);
+  await updateFile(content, data.sha);
+  loadMarkers();
+}
+
+async function editMarker(index) {
+  if (!currentUser || !githubToken) return alert("Login and add token first");
+  const ok = confirm('Update timestamp to now?');
+  if (!ok) return;
+
+  const response = await githubFetch(apiUrlForContents(filePath), { method: 'GET' });
+  const data = await response.json();
+  const content = JSON.parse(atob(data.content));
+
+  if (!content?.markers?.[index]) return;
+  if (content.markers[index].user !== currentUser) return alert('You can only edit your own markers');
+
+  content.markers[index].timestamp = Date.now();
+  await updateFile(content, data.sha);
+  loadMarkers();
+}
+
+map.on('click', async function(e) {
+  if (pendingCustomMarker) {
+    const ok = await saveMarker(e.latlng.lat, e.latlng.lng, pendingCustomMarker);
+    if (ok) pendingCustomMarker = null;
+    const status = document.getElementById('addMarkerStatus');
+    if (status && !pendingCustomMarker) status.innerText = '';
+    return;
+  }
+  saveMarker(e.latlng.lat, e.latlng.lng);
+});
+
+loadMarkers();
+let markersPollHandle = null;
+function startPolling() {
+  if (markersPollHandle) clearInterval(markersPollHandle);
+  // Unauthed GitHub API is heavily rate-limited; poll slower without a token.
+  const intervalMs = githubToken ? 8000 : 60000;
+  markersPollHandle = setInterval(loadMarkers, intervalMs);
+}
+startPolling();
+
+</script>
+</body>
+</html>
