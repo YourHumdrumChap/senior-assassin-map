@@ -11,13 +11,6 @@ Deploy on GitHub Pages (project pages): the map page auto-detects `owner/repo` f
 
 For local testing (opening the file directly or via a local server), set `defaultRepoOwner` and `defaultRepoName` near the top of `War map.html`.
 
-## GitHub token
+## Marker storage
 
-To add/edit/delete markers you need a GitHub token with permission to update repository contents.
-
-- Prefer a fine-grained PAT scoped to this repo with **Contents: Read and write**.
-- Paste it into the map's **GitHub Token** box and click **Save Token**.
-
-## Data file
-
-The marker data lives in `map-data.json` at the repo root.
+Markers are stored locally in your browser via `localStorage` (per device/browser).
