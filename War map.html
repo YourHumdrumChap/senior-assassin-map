@@ -76,7 +76,9 @@
     <input id="markerTitleInput" placeholder="Marker title (optional)">
     <textarea id="markerDescInput" placeholder="Description (optional)" rows="2"></textarea>
     <input id="markerColorInput" type="color" value="#ff0000">
-    <button onclick="beginAddCustomMarker()">Add Marker</button>
+    <button id="addMarkerBtn" onclick="beginAddCustomMarker()">Add Marker</button>
+    <button id="saveEditsBtn" onclick="saveMarkerEdits()" style="display:none;">Save Changes</button>
+    <button id="cancelEditsBtn" onclick="cancelMarkerEdits()" style="display:none;">Cancel Edit</button>
     <div id="addMarkerStatus" style="font-size:12px;color:#555;margin-bottom:6px;"></div>
   </div>
 </div>
@@ -110,6 +112,8 @@ let session = null;
 let currentUser = null;
 let pendingCustomMarker = null;
 let markersReloadHandle = null;
+let markersById = new Map();
+let editingMarkerId = null;
 
 function setAddMarkerStatus(text, isError = false) {
   const status = document.getElementById('addMarkerStatus');
@@ -121,6 +125,29 @@ function setAddMarkerStatus(text, isError = false) {
 function scheduleReloadMarkers() {
   if (markersReloadHandle) clearTimeout(markersReloadHandle);
   markersReloadHandle = setTimeout(loadMarkers, 150);
+}
+
+function setEditMode(markerId) {
+  editingMarkerId = markerId;
+  pendingCustomMarker = null;
+
+  const addBtn = document.getElementById('addMarkerBtn');
+  const saveBtn = document.getElementById('saveEditsBtn');
+  const cancelBtn = document.getElementById('cancelEditsBtn');
+  if (addBtn) addBtn.style.display = markerId ? 'none' : '';
+  if (saveBtn) saveBtn.style.display = markerId ? '' : 'none';
+  if (cancelBtn) cancelBtn.style.display = markerId ? '' : 'none';
+
+  if (markerId) {
+    setAddMarkerStatus('Editing marker. Update fields then tap “Save Changes”.');
+  } else {
+    setAddMarkerStatus('');
+  }
+}
+
+function cancelMarkerEdits() {
+  editingMarkerId = null;
+  setEditMode(null);
 }
 
 function escapeHtml(text) {
@@ -181,7 +208,11 @@ async function loadMarkers() {
 
   markersLayer.clearLayers();
 
+  markersById = new Map();
+
   (data || []).forEach((m) => {
+
+    markersById.set(m.id, m);
 
     const icon = L.divIcon({
       className: "",
@@ -215,6 +246,11 @@ async function loadMarkers() {
 function beginAddCustomMarker() {
   if (!currentUser) return (window.location.href = 'login.html');
 
+  if (editingMarkerId) {
+    setAddMarkerStatus('Finish editing (Save/Cancel) before adding a new marker.', true);
+    return;
+  }
+
   const title = (document.getElementById('markerTitleInput')?.value || '').trim();
   const description = (document.getElementById('markerDescInput')?.value || '').trim();
   const color = (document.getElementById('markerColorInput')?.value || '#ff0000').trim();
@@ -225,6 +261,78 @@ function beginAddCustomMarker() {
   };
 
   setAddMarkerStatus('Click the map to place your marker…');
+}
+
+async function editMarker(id) {
+  if (!session) return alert('Please login first');
+
+  let m = markersById.get(id);
+  if (!m) {
+    const { data, error } = await sb.schema('public').from('markers').select('id,user_id,username,title,description,color,lat,lng,created_at,updated_at').eq('id', id).maybeSingle();
+    if (error) {
+      console.warn(error);
+      alert(error.message);
+      return;
+    }
+    m = data;
+  }
+
+  if (!m) {
+    alert('Marker not found. Try refreshing.');
+    return;
+  }
+
+  if (m.user_id !== session.user.id) {
+    alert('You can only edit your own markers.');
+    return;
+  }
+
+  // Populate fields
+  const titleEl = document.getElementById('markerTitleInput');
+  const descEl = document.getElementById('markerDescInput');
+  const colorEl = document.getElementById('markerColorInput');
+  if (titleEl) titleEl.value = m.title || '';
+  if (descEl) descEl.value = m.description || '';
+  if (colorEl) colorEl.value = m.color || '#ff0000';
+
+  setEditMode(id);
+}
+
+async function saveMarkerEdits() {
+  if (!session) return alert('Please login first');
+  if (!editingMarkerId) return;
+
+  const m = markersById.get(editingMarkerId);
+  if (m && m.user_id !== session.user.id) {
+    alert('You can only edit your own markers.');
+    return;
+  }
+
+  const title = (document.getElementById('markerTitleInput')?.value || '').trim();
+  const description = (document.getElementById('markerDescInput')?.value || '').trim();
+  const color = (document.getElementById('markerColorInput')?.value || '#ff0000').trim();
+
+  setAddMarkerStatus('Saving changes…');
+  const { error } = await sb
+    .schema('public')
+    .from('markers')
+    .update({
+      title,
+      description,
+      color,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', editingMarkerId);
+
+  if (error) {
+    console.warn(error);
+    const code = error.code ? ` (code ${error.code})` : '';
+    setAddMarkerStatus(`Failed to save changes: ${error.message}${code}`, true);
+    return;
+  }
+
+  setEditMode(null);
+  scheduleReloadMarkers();
 }
 
 async function saveMarker(lat, lng, options = null) {
@@ -275,26 +383,8 @@ async function saveMarker(lat, lng, options = null) {
 
 async function deleteMarker(id) {
   if (!session) return alert('Please login first');
+  if (editingMarkerId === id) setEditMode(null);
   const { error } = await sb.schema('public').from('markers').delete().eq('id', id);
-  if (error) {
-    console.warn(error);
-    alert(error.message);
-    return;
-  }
-  scheduleReloadMarkers();
-}
-
-async function editMarker(id) {
-  if (!session) return alert("Please login first");
-  const ok = confirm('Update timestamp to now?');
-  if (!ok) return;
-
-  const { error } = await sb
-    .schema('public')
-    .from('markers')
-    .update({ updated_at: new Date().toISOString() })
-    .eq('id', id);
-
   if (error) {
     console.warn(error);
     alert(error.message);
