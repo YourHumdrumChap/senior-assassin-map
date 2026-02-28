@@ -135,7 +135,7 @@ const APP_VERSION = '20260227-1';
 
 const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 
-const LABEL_MIN_ZOOM = 13; // hide marker title labels when zoomed out below this
+const LABEL_MIN_ZOOM = 5; // hide marker title labels when zoomed out below this
 
 let session = null;
 let currentUser = null;
