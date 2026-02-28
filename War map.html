@@ -66,6 +66,7 @@
     <b id="playerLabel"></b>
     <button onclick="logout()">Logout</button>
     <input id="markerTitleInput" placeholder="Marker title (optional)">
+    <textarea id="markerDescInput" placeholder="Description (optional)" rows="2" style="width:100%;margin-bottom:8px;padding:10px;box-sizing:border-box;font-size:16px;resize:vertical;"></textarea>
     <input id="markerColorInput" type="color" value="#ff0000">
     <button onclick="beginAddCustomMarker()">Add Marker</button>
     <div id="addMarkerStatus" style="font-size:12px;color:#555;margin-bottom:6px;"></div>
@@ -143,7 +144,7 @@ async function loadMarkers() {
   const { data, error } = await sb
     .schema('public')
     .from('markers')
-    .select('id,user_id,username,title,color,lat,lng,created_at,updated_at')
+    .select('id,user_id,username,title,description,color,lat,lng,created_at,updated_at')
     .order('created_at', { ascending: true });
 
   if (error) {
@@ -176,10 +177,11 @@ async function loadMarkers() {
 
     const canEdit = session && m.user_id === session.user.id;
     const titleLine = m.title ? `<b>${escapeHtml(m.title)}</b><br>` : '';
+    const descLine = (m.description && String(m.description).trim()) ? `${escapeHtml(String(m.description).trim())}<br>` : '';
     const who = m.username || '';
     const when = m.updated_at || m.created_at;
     marker.bindPopup(`
-      ${titleLine}${escapeHtml(who)}<br>
+      ${titleLine}${descLine}${escapeHtml(who)}<br>
       ${new Date(when).toLocaleString()}<br>
       ${canEdit ? `<button onclick="editMarker('${m.id}')">Edit</button>
       <button onclick="deleteMarker('${m.id}')">Delete</button>` : ''}
@@ -191,9 +193,11 @@ function beginAddCustomMarker() {
   if (!currentUser) return (window.location.href = 'login.html');
 
   const title = (document.getElementById('markerTitleInput')?.value || '').trim();
+  const description = (document.getElementById('markerDescInput')?.value || '').trim();
   const color = (document.getElementById('markerColorInput')?.value || '#ff0000').trim();
   pendingCustomMarker = {
     title,
+    description,
     color
   };
 
@@ -214,11 +218,13 @@ async function saveMarker(lat, lng, options = null) {
 
   const chosenColor = (options && options.color) ? options.color : '#ff0000';
   const title = (options && typeof options.title === 'string') ? options.title : '';
+  const description = (options && typeof options.description === 'string') ? options.description : '';
 
   const { error } = await sb.schema('public').from('markers').insert({
     user_id: session.user.id,
     username: currentUser,
     title,
+    description,
     color: chosenColor,
     lat,
     lng

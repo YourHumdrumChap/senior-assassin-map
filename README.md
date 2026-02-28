@@ -26,4 +26,12 @@ For local testing (opening the file directly or via a local server), set `defaul
 ## Data model
 
 - Markers are stored in the Supabase table `public.markers`.
+- Marker fields include: `title` and optional `description`.
 - Realtime subscriptions keep the map updated across devices.
+
+## Teammate logins
+
+Supabase Auth stores passwords securely (hashed) and does not let you read them back.
+
+- This project creates a safe table `public.profiles` that stores `user_id` + `username` for each account.
+- If you need an “admin list of accounts”, use `public.profiles` (not passwords).

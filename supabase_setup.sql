@@ -8,12 +8,16 @@ create table if not exists public.markers (
   user_id uuid not null,
   username text not null,
   title text,
+  description text,
   color text not null,
   lat double precision not null,
   lng double precision not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- If the table already existed, ensure the new column is present
+alter table public.markers add column if not exists description text;
 
 -- Keep updated_at current
 create or replace function public.set_updated_at()
@@ -68,3 +72,60 @@ using (auth.uid() = user_id);
 -- 4) Realtime (optional but recommended)
 -- In the Dashboard, enable Realtime for this table if needed.
 alter publication supabase_realtime add table public.markers;
+
+-- 5) User profiles (user_id + username)
+-- Supabase Auth stores passwords securely (hashed) and does NOT allow reading them back.
+-- This table is the safe way to keep a list of teammates and their user IDs.
+
+create table if not exists public.profiles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  username text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.profiles enable row level security;
+
+drop policy if exists "Profiles are readable by authenticated users" on public.profiles;
+create policy "Profiles are readable by authenticated users"
+on public.profiles for select
+to authenticated
+using (true);
+
+drop policy if exists "Users can insert their own profile" on public.profiles;
+create policy "Users can insert their own profile"
+on public.profiles for insert
+to authenticated
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can update their own profile" on public.profiles;
+create policy "Users can update their own profile"
+on public.profiles for update
+to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+-- Automatically create a profile row when a new auth user is created
+create or replace function public.handle_new_user_profile()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uname text;
+begin
+  uname := coalesce(new.raw_user_meta_data->>'username', split_part(new.email, '@', 1));
+  insert into public.profiles (user_id, username)
+  values (new.id, uname)
+  on conflict (user_id) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created_profile on auth.users;
+create trigger on_auth_user_created_profile
+after insert on auth.users
+for each row execute function public.handle_new_user_profile();
+
+-- Optional: include profiles in Realtime
+-- alter publication supabase_realtime add table public.profiles;
