@@ -114,6 +114,7 @@ let pendingCustomMarker = null;
 let markersReloadHandle = null;
 let markersById = new Map();
 let editingMarkerId = null;
+let didCenterOnFRHS = false;
 
 function setAddMarkerStatus(text, isError = false) {
   const status = document.getElementById('addMarkerStatus');
@@ -209,6 +210,16 @@ async function loadMarkers() {
   markersLayer.clearLayers();
 
   markersById = new Map();
+
+  if (!didCenterOnFRHS) {
+    const frhs = (data || []).find((m) => m && m.title === 'FRHS' && typeof m.lat === 'number' && typeof m.lng === 'number');
+    if (frhs) {
+      // Keep current zoom if user has one, otherwise a reasonable default.
+      const z = typeof map?.getZoom === 'function' ? map.getZoom() : 13;
+      map.setView([frhs.lat, frhs.lng], z, { animate: false });
+      didCenterOnFRHS = true;
+    }
+  }
 
   (data || []).forEach((m) => {
 
