@@ -71,7 +71,13 @@ using (auth.uid() = user_id);
 
 -- 4) Realtime (optional but recommended)
 -- In the Dashboard, enable Realtime for this table if needed.
-alter publication supabase_realtime add table public.markers;
+do $$
+begin
+  alter publication supabase_realtime add table public.markers;
+exception
+  when duplicate_object then null;
+  when undefined_object then null;
+end $$;
 
 -- 4b) Shared editable color key (legend)
 create table if not exists public.color_key (
@@ -105,7 +111,13 @@ using (true)
 with check (true);
 
 -- Optional but recommended for live updates
-alter publication supabase_realtime add table public.color_key;
+do $$
+begin
+  alter publication supabase_realtime add table public.color_key;
+exception
+  when duplicate_object then null;
+  when undefined_object then null;
+end $$;
 
 -- 5) User profiles (user_id + username)
 -- Supabase Auth stores passwords securely (hashed) and does NOT allow reading them back.
