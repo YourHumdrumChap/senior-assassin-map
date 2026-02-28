@@ -40,30 +40,20 @@
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="supabase-config.js"></script>
+
 <script>
-let currentUser = localStorage.getItem('currentUser');
+const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+
+let session = null;
+let currentUser = null;
 let pendingCustomMarker = null;
+let markersReloadHandle = null;
 
-if (!currentUser) {
-  window.location.href = 'login.html';
-}
-
-const localMarkersKey = 'mapMarkers';
-
-function loadLocalContent() {
-  try {
-    const raw = localStorage.getItem(localMarkersKey);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.markers)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function saveLocalContent(content) {
-  localStorage.setItem(localMarkersKey, JSON.stringify(content));
+function scheduleReloadMarkers() {
+  if (markersReloadHandle) clearTimeout(markersReloadHandle);
+  markersReloadHandle = setTimeout(loadMarkers, 150);
 }
 
 function escapeHtml(text) {
@@ -75,62 +65,10 @@ function escapeHtml(text) {
     .replaceAll("'", '&#39;');
 }
 
-const players = {
-  "alpha": { password: "1234", color: "red" },
-  "bravo": { password: "1234", color: "blue" },
-  "charlie": { password: "1234", color: "green" },
-  "delta": { password: "1234", color: "purple" },
-  "echo": { password: "1234", color: "orange" },
-  "foxtrot": { password: "1234", color: "black" }
-};
-
-// load any saved players from localStorage
-function loadStoredPlayers() {
-  const stored = localStorage.getItem('extraPlayers');
-  if (stored) {
-    try {
-      const obj = JSON.parse(stored);
-      for (const u in obj) {
-        players[u] = obj[u];
-      }
-    } catch (e) {
-      console.warn('failed to parse saved players', e);
-    }
-  }
-}
-
-// persist new accounts
-function saveStoredPlayers() {
-  const extras = {};
-  for (const u in players) {
-    if (!['alpha','bravo','charlie','delta','echo','foxtrot'].includes(u)) {
-      extras[u] = players[u];
-    }
-  }
-  localStorage.setItem('extraPlayers', JSON.stringify(extras));
-}
-
-// simple color pool for new accounts
-const colorPool = [
-  'red','blue','green','purple','orange','black','yellow','cyan','magenta'
-];
-function pickColor() {
-  // pick random unused color
-  const used = new Set(Object.values(players).map(p=>p.color));
-  const available = colorPool.filter(c=>!used.has(c));
-  return available.length ? available[Math.floor(Math.random()*available.length)] : 'gray';
-}
-
-function logout() {
+async function logout() {
+  await sb.auth.signOut();
   localStorage.removeItem('currentUser');
   window.location.href = 'login.html';
-}
-
-// initialize stored players on load
-loadStoredPlayers();
-
-if (currentUser && document.getElementById('playerLabel')) {
-  document.getElementById('playerLabel').innerText = 'Logged in: ' + currentUser;
 }
 
 var map = L.map('map', { zoomControl: false }).setView([40.5853, -105.0844], 13); // Fort Collins
@@ -141,29 +79,37 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 let markersLayer = L.layerGroup().addTo(map);
 
-async function loadMarkers() {
-  // Prefer local markers (created in this browser)
-  let content = loadLocalContent();
+async function initAuth() {
+  const { data, error } = await sb.auth.getSession();
+  if (error) {
+    console.warn(error);
+  }
+  session = data.session;
+  if (!session) {
+    window.location.href = 'login.html';
+    return;
+  }
 
-  // Otherwise try reading map-data.json from same origin
-  if (!content) {
-    try {
-      const response = await fetch('map-data.json', { cache: 'no-store' });
-      if (response.ok) {
-        const parsed = await response.json();
-        content = parsed && Array.isArray(parsed.markers) ? parsed : { markers: [] };
-      } else {
-        content = { markers: [] };
-      }
-    } catch {
-      content = { markers: [] };
-    }
-    saveLocalContent(content);
+  currentUser = session.user?.user_metadata?.username || (session.user?.email ? session.user.email.split('@')[0] : '');
+  localStorage.setItem('currentUser', currentUser);
+  const label = document.getElementById('playerLabel');
+  if (label) label.innerText = 'Logged in: ' + currentUser;
+}
+
+async function loadMarkers() {
+  const { data, error } = await sb
+    .from('markers')
+    .select('id,user_id,username,title,color,lat,lng,created_at,updated_at')
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.warn(error);
+    return;
   }
 
   markersLayer.clearLayers();
 
-  (content.markers || []).forEach((m, index) => {
+  (data || []).forEach((m) => {
 
     const icon = L.divIcon({
       className: "",
@@ -180,13 +126,15 @@ async function loadMarkers() {
       });
     }
 
-    const canEdit = currentUser && m.user === currentUser;
+    const canEdit = session && m.user_id === session.user.id;
     const titleLine = m.title ? `<b>${escapeHtml(m.title)}</b><br>` : '';
+    const who = m.username || '';
+    const when = m.updated_at || m.created_at;
     marker.bindPopup(`
-      ${titleLine}${escapeHtml(m.user)}<br>
-      ${new Date(m.timestamp).toLocaleString()}<br>
-      ${canEdit ? `<button onclick="editMarker(${index})">Edit</button>
-      <button onclick="deleteMarker(${index})">Delete</button>` : ''}
+      ${titleLine}${escapeHtml(who)}<br>
+      ${new Date(when).toLocaleString()}<br>
+      ${canEdit ? `<button onclick="editMarker('${m.id}')">Edit</button>
+      <button onclick="deleteMarker('${m.id}')">Delete</button>` : ''}
     `);
   });
 }
@@ -211,53 +159,57 @@ async function saveMarker(lat, lng, options = null) {
     return false;
   }
 
-  const content = loadLocalContent() || { markers: [] };
-
-  const chosenColor = (options && options.color) ? options.color : (players[currentUser]?.color || 'gray');
+  const chosenColor = (options && options.color) ? options.color : '#ff0000';
   const title = (options && typeof options.title === 'string') ? options.title : '';
 
-  content.markers.push({
-    lat,
-    lng,
-    user: currentUser,
+  const { error } = await sb.from('markers').insert({
+    user_id: session.user.id,
+    username: currentUser,
     title,
     color: chosenColor,
-    timestamp: Date.now()
+    lat,
+    lng
   });
 
-  saveLocalContent(content);
-  loadMarkers();
+  if (error) {
+    console.warn(error);
+    alert(error.message);
+    return false;
+  }
+
+  scheduleReloadMarkers();
   const status = document.getElementById('addMarkerStatus');
   if (status) status.innerText = '';
   return true;
 }
 
-async function deleteMarker(index) {
-  if (!currentUser) return alert("Please login first");
-  const content = loadLocalContent() || { markers: [] };
-
-  if (!content?.markers?.[index]) return;
-  if (content.markers[index].user !== currentUser) return alert('You can only delete your own markers');
-
-  content.markers.splice(index, 1);
-  saveLocalContent(content);
-  loadMarkers();
+async function deleteMarker(id) {
+  if (!session) return alert('Please login first');
+  const { error } = await sb.from('markers').delete().eq('id', id);
+  if (error) {
+    console.warn(error);
+    alert(error.message);
+    return;
+  }
+  scheduleReloadMarkers();
 }
 
-async function editMarker(index) {
-  if (!currentUser) return alert("Please login first");
+async function editMarker(id) {
+  if (!session) return alert("Please login first");
   const ok = confirm('Update timestamp to now?');
   if (!ok) return;
 
-  const content = loadLocalContent() || { markers: [] };
+  const { error } = await sb
+    .from('markers')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', id);
 
-  if (!content?.markers?.[index]) return;
-  if (content.markers[index].user !== currentUser) return alert('You can only edit your own markers');
-
-  content.markers[index].timestamp = Date.now();
-
-  saveLocalContent(content);
-  loadMarkers();
+  if (error) {
+    console.warn(error);
+    alert(error.message);
+    return;
+  }
+  scheduleReloadMarkers();
 }
 
 map.on('click', async function(e) {
@@ -271,7 +223,21 @@ map.on('click', async function(e) {
   // Markers are only placed after clicking "Add Marker".
 });
 
-loadMarkers();
+async function initRealtime() {
+  sb
+    .channel('markers-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'markers' }, () => {
+      scheduleReloadMarkers();
+    })
+    .subscribe();
+}
+
+// boot
+(async () => {
+  await initAuth();
+  await loadMarkers();
+  await initRealtime();
+})();
 
 
 </script>

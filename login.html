@@ -46,67 +46,18 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="supabase-config.js"></script>
+
 <script>
 const mapPage = 'War map.html';
 
-const defaultPlayers = {
-  "alpha": { password: "1234", color: "red" },
-  "bravo": { password: "1234", color: "blue" },
-  "charlie": { password: "1234", color: "green" },
-  "delta": { password: "1234", color: "purple" },
-  "echo": { password: "1234", color: "orange" },
-  "foxtrot": { password: "1234", color: "black" }
-};
+const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 
-let players = null;
-
-const localPlayersKey = 'loginPlayers';
-
-function loadLocalPlayers() {
-  try {
-    const raw = localStorage.getItem(localPlayersKey);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function saveLocalPlayers(obj) {
-  localStorage.setItem(localPlayersKey, JSON.stringify(obj));
-}
-
-async function loadPlayers() {
-  // 1) Try local overrides first (created accounts)
-  const local = loadLocalPlayers();
-  if (local) {
-    players = { ...defaultPlayers, ...local };
-    return;
-  }
-
-  // 2) Try reading login.json from same origin (works on GitHub Pages / local server)
-  try {
-    const response = await fetch('login.json', { cache: 'no-store' });
-    if (response.ok) {
-      const parsed = await response.json();
-      const fromFile = parsed?.players && typeof parsed.players === 'object' ? parsed.players : {};
-      players = { ...defaultPlayers, ...fromFile };
-      return;
-    }
-  } catch {
-    // ignored
-  }
-
-  players = { ...defaultPlayers };
-}
-
-const colorPool = ['red','blue','green','purple','orange','black','yellow','cyan','magenta'];
-function pickColor() {
-  const used = new Set(Object.values(players || {}).map(p => p.color));
-  const available = colorPool.filter(c => !used.has(c));
-  return available.length ? available[Math.floor(Math.random() * available.length)] : 'gray';
+function usernameToEmail(username) {
+  // Supabase Auth expects an email; we map username -> fake email.
+  // Keep this stable forever or existing accounts won't be able to sign in.
+  return `${username}@senior-assassin.local`;
 }
 
 function showRegister() {
@@ -123,20 +74,18 @@ async function login() {
   const u = document.getElementById('username').value.trim();
   const p = document.getElementById('password').value;
 
-  try {
-    if (!players) await loadPlayers();
-  } catch (e) {
-    console.warn(e);
-    alert(String(e.message || e));
+  if (!u || !p) return alert('enter username and password');
+  const email = usernameToEmail(u);
+
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: p });
+  if (error) {
+    alert(error.message);
     return;
   }
 
-  if (players[u] && players[u].password === p) {
-    localStorage.setItem('currentUser', u);
-    window.location.href = mapPage;
-  } else {
-    alert('Invalid login');
-  }
+  // Store for label convenience
+  localStorage.setItem('currentUser', data.user?.user_metadata?.username || u);
+  window.location.href = mapPage;
 }
 
 async function register() {
@@ -144,27 +93,35 @@ async function register() {
   const p = document.getElementById('newPassword').value;
   if (!u || !p) return alert('enter username and password');
 
-  try {
-    if (!players) await loadPlayers();
-    if (players[u]) return alert('username already exists');
-    players[u] = { password: p, color: pickColor() };
-    // Persist locally (no tokens/backends)
-    const local = loadLocalPlayers() || {};
-    local[u] = players[u];
-    saveLocalPlayers(local);
-    alert('account created, please login');
-    showLogin();
-    document.getElementById('username').value = u;
-    document.getElementById('password').value = '';
-  } catch (e) {
-    console.warn(e);
-    alert(String(e.message || e));
+  const email = usernameToEmail(u);
+  const { data, error } = await sb.auth.signUp({
+    email,
+    password: p,
+    options: { data: { username: u } }
+  });
+
+  if (error) {
+    alert(error.message);
+    return;
   }
+
+  // If email confirmations are enabled, session may be null.
+  if (data.session) {
+    localStorage.setItem('currentUser', u);
+    window.location.href = mapPage;
+    return;
+  }
+
+  alert('Account created. If login fails, ask the admin to disable email confirmation in Supabase Auth settings.');
+  showLogin();
+  document.getElementById('username').value = u;
+  document.getElementById('password').value = '';
 }
 
 // If already logged in, jump straight to the map.
-const existing = localStorage.getItem('currentUser');
-if (existing) window.location.href = mapPage;
+sb.auth.getSession().then(({ data }) => {
+  if (data.session) window.location.href = mapPage;
+});
 </script>
 </body>
 </html>
