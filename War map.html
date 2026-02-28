@@ -3,11 +3,19 @@
 <head>
   <title>Senior Assassin Tactical Map</title>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
-    #map { height: 100vh; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      -webkit-text-size-adjust: 100%;
+    }
+    #map {
+      height: 100vh;
+      height: 100dvh; /* iOS dynamic viewport */
+    }
     #controlPanel {
       position: absolute;
       top: 10px;
@@ -17,10 +25,38 @@
       padding: 10px;
       border-radius: 8px;
       width: 220px;
-      font-size: 14px;
+      font-size: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
     }
-    input { width: 100%; margin-bottom: 5px; }
-    button { width: 100%; margin-bottom: 5px; }
+    input {
+      width: 100%;
+      margin-bottom: 8px;
+      padding: 10px;
+      box-sizing: border-box;
+      font-size: 16px; /* prevents iOS Safari zoom */
+    }
+    button {
+      width: 100%;
+      margin-bottom: 8px;
+      padding: 12px;
+      font-size: 16px;
+      touch-action: manipulation;
+    }
+
+    /* iPhone-friendly: move controls to bottom for easier reach */
+    @media (max-width: 520px) {
+      #controlPanel {
+        top: auto;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: calc(10px + env(safe-area-inset-bottom));
+        width: calc(100vw - 20px);
+        max-width: 520px;
+        max-height: 46dvh;
+        overflow: auto;
+        padding-bottom: calc(10px + env(safe-area-inset-bottom));
+      }
+    }
   </style>
 </head>
 <body>
