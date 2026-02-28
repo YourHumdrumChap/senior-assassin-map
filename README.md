@@ -15,7 +15,12 @@ For local testing (opening the file directly or via a local server), set `defaul
 
 - Create a Supabase project.
 - Run the SQL in `supabase_setup.sql` (creates `public.markers` + RLS policies + realtime publication).
-- In Supabase Auth settings, consider disabling email confirmations (since the app uses username→email mapping).
+- If you get `PGRST205` (schema cache / table not found), go to **Supabase Dashboard → Settings → API → Reload schema cache**, then refresh the page.
+- In Supabase Auth settings, disable email confirmations (since the app uses username→email mapping and shouldn’t send real emails).
+- If you see “email rate limit exceeded” during registration:
+	- Turn off **Confirm email** in Supabase Auth (stops confirmation emails), and/or
+	- Configure **Custom SMTP** in Supabase so you control email sending limits.
+	- If you already tried many times, wait a bit for the rate limit window to reset.
 - Put your Supabase Project URL + anon key into `supabase-config.js`.
 
 ## Data model

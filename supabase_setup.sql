@@ -1,4 +1,7 @@
 -- Run this in Supabase SQL Editor
+-- Enable UUID generation used by gen_random_uuid()
+create extension if not exists pgcrypto;
+
 -- 1) Table to store markers
 create table if not exists public.markers (
   id uuid primary key default gen_random_uuid(),

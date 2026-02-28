@@ -51,6 +51,13 @@ let currentUser = null;
 let pendingCustomMarker = null;
 let markersReloadHandle = null;
 
+function setAddMarkerStatus(text, isError = false) {
+  const status = document.getElementById('addMarkerStatus');
+  if (!status) return;
+  status.style.color = isError ? '#b00020' : '#555';
+  status.innerText = text || '';
+}
+
 function scheduleReloadMarkers() {
   if (markersReloadHandle) clearTimeout(markersReloadHandle);
   markersReloadHandle = setTimeout(loadMarkers, 150);
@@ -98,14 +105,19 @@ async function initAuth() {
 
 async function loadMarkers() {
   const { data, error } = await sb
+    .schema('public')
     .from('markers')
     .select('id,user_id,username,title,color,lat,lng,created_at,updated_at')
     .order('created_at', { ascending: true });
 
   if (error) {
     console.warn(error);
+    setAddMarkerStatus(`Failed to load markers: ${error.message}`, true);
     return;
   }
+
+  // Clear any previous load errors once we succeed.
+  setAddMarkerStatus('');
 
   markersLayer.clearLayers();
 
@@ -149,8 +161,7 @@ function beginAddCustomMarker() {
     color
   };
 
-  const status = document.getElementById('addMarkerStatus');
-  if (status) status.innerText = 'Click the map to place your marker…';
+  setAddMarkerStatus('Click the map to place your marker…');
 }
 
 async function saveMarker(lat, lng, options = null) {
@@ -159,10 +170,16 @@ async function saveMarker(lat, lng, options = null) {
     return false;
   }
 
+  if (!session) {
+    setAddMarkerStatus('Session expired. Please log in again.', true);
+    window.location.href = 'login.html';
+    return false;
+  }
+
   const chosenColor = (options && options.color) ? options.color : '#ff0000';
   const title = (options && typeof options.title === 'string') ? options.title : '';
 
-  const { error } = await sb.from('markers').insert({
+  const { error } = await sb.schema('public').from('markers').insert({
     user_id: session.user.id,
     username: currentUser,
     title,
@@ -173,19 +190,27 @@ async function saveMarker(lat, lng, options = null) {
 
   if (error) {
     console.warn(error);
-    alert(error.message);
+    const code = error.code ? ` (code ${error.code})` : '';
+    const hintLines = [];
+    if (String(error.message || '').toLowerCase().includes('row level security')) {
+      hintLines.push('Hint: RLS denied this insert. Make sure you are logged in and ran supabase_setup.sql policies.');
+    }
+    if (String(error.message || '').toLowerCase().includes('relation') && String(error.message || '').toLowerCase().includes('does not exist')) {
+      hintLines.push('Hint: Table missing. Run supabase_setup.sql in Supabase SQL Editor.');
+    }
+    const hint = hintLines.length ? `\n${hintLines.join('\n')}` : '';
+    setAddMarkerStatus(`Failed to save marker: ${error.message}${code}${hint}`, true);
     return false;
   }
 
   scheduleReloadMarkers();
-  const status = document.getElementById('addMarkerStatus');
-  if (status) status.innerText = '';
+  setAddMarkerStatus('');
   return true;
 }
 
 async function deleteMarker(id) {
   if (!session) return alert('Please login first');
-  const { error } = await sb.from('markers').delete().eq('id', id);
+  const { error } = await sb.schema('public').from('markers').delete().eq('id', id);
   if (error) {
     console.warn(error);
     alert(error.message);
@@ -200,6 +225,7 @@ async function editMarker(id) {
   if (!ok) return;
 
   const { error } = await sb
+    .schema('public')
     .from('markers')
     .update({ updated_at: new Date().toISOString() })
     .eq('id', id);
@@ -214,10 +240,10 @@ async function editMarker(id) {
 
 map.on('click', async function(e) {
   if (pendingCustomMarker) {
+    setAddMarkerStatus('Saving marker…');
     const ok = await saveMarker(e.latlng.lat, e.latlng.lng, pendingCustomMarker);
     if (ok) pendingCustomMarker = null;
-    const status = document.getElementById('addMarkerStatus');
-    if (status && !pendingCustomMarker) status.innerText = '';
+    if (!pendingCustomMarker) setAddMarkerStatus('');
     return;
   }
   // Markers are only placed after clicking "Add Marker".
