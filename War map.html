@@ -28,6 +28,12 @@
       font-size: 16px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.12);
     }
+    #controlPanel.collapsed #menuBody {
+      display: none;
+    }
+    #controlPanel.collapsed #addMarkerStatus {
+      margin-bottom: 0;
+    }
     input {
       width: 100%;
       margin-bottom: 8px;
@@ -60,9 +66,19 @@
         bottom: calc(10px + env(safe-area-inset-bottom));
         width: calc(100vw - 20px);
         max-width: 520px;
-        max-height: 46dvh;
+        max-height: 36dvh;
         overflow: auto;
-        padding-bottom: calc(10px + env(safe-area-inset-bottom));
+        padding: 8px;
+        padding-bottom: calc(8px + env(safe-area-inset-bottom));
+        font-size: 14px;
+      }
+      input, textarea {
+        padding: 8px;
+        font-size: 16px;
+      }
+      button {
+        padding: 10px;
+        font-size: 16px;
       }
     }
   </style>
@@ -71,15 +87,21 @@
 
 <div id="controlPanel">
   <div id="mapControls">
-    <b id="playerLabel"></b>
-    <button onclick="logout()">Logout</button>
-    <input id="markerTitleInput" placeholder="Marker title (optional)">
-    <textarea id="markerDescInput" placeholder="Description (optional)" rows="2"></textarea>
-    <input id="markerColorInput" type="color" value="#ff0000">
-    <button id="addMarkerBtn" onclick="beginAddCustomMarker()">Add Marker</button>
-    <button id="saveEditsBtn" onclick="saveMarkerEdits()" style="display:none;">Save Changes</button>
-    <button id="cancelEditsBtn" onclick="cancelMarkerEdits()" style="display:none;">Cancel Edit</button>
-    <div id="addMarkerStatus" style="font-size:12px;color:#555;margin-bottom:6px;"></div>
+    <div id="panelHeader" style="display:flex;align-items:center;gap:8px;">
+      <b id="playerLabel" style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></b>
+      <button id="toggleMenuBtn" type="button" onclick="toggleMenu()" style="width:auto;margin-bottom:0;padding:8px 10px;">Hide</button>
+    </div>
+    <div id="addMarkerStatus" style="font-size:12px;color:#555;margin:6px 0 8px 0;"></div>
+
+    <div id="menuBody">
+      <button onclick="logout()">Logout</button>
+      <input id="markerTitleInput" placeholder="Marker title (optional)">
+      <textarea id="markerDescInput" placeholder="Description (optional)" rows="2"></textarea>
+      <input id="markerColorInput" type="color" value="#ff0000">
+      <button id="addMarkerBtn" onclick="beginAddCustomMarker()">Add Marker</button>
+      <button id="saveEditsBtn" onclick="saveMarkerEdits()" style="display:none;">Save Changes</button>
+      <button id="cancelEditsBtn" onclick="cancelMarkerEdits()" style="display:none;">Cancel Edit</button>
+    </div>
   </div>
 </div>
 
@@ -115,6 +137,22 @@ let markersReloadHandle = null;
 let markersById = new Map();
 let editingMarkerId = null;
 let didCenterOnFRHS = false;
+
+function setMenuCollapsed(collapsed) {
+  const panel = document.getElementById('controlPanel');
+  if (!panel) return;
+  if (collapsed) panel.classList.add('collapsed');
+  else panel.classList.remove('collapsed');
+
+  const btn = document.getElementById('toggleMenuBtn');
+  if (btn) btn.innerText = collapsed ? 'Menu' : 'Hide';
+}
+
+function toggleMenu() {
+  const panel = document.getElementById('controlPanel');
+  if (!panel) return;
+  setMenuCollapsed(!panel.classList.contains('collapsed'));
+}
 
 function setAddMarkerStatus(text, isError = false) {
   const status = document.getElementById('addMarkerStatus');
@@ -426,6 +464,14 @@ async function initRealtime() {
 
 // boot
 (async () => {
+  // Default to collapsed on small screens to show more map.
+  try {
+    if (window.matchMedia && window.matchMedia('(max-width: 520px)').matches) {
+      setMenuCollapsed(true);
+    }
+  } catch {
+    // ignore
+  }
   await initAuth();
   await loadMarkers();
   await initRealtime();
