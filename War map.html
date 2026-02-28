@@ -110,7 +110,6 @@ let session = null;
 let currentUser = null;
 let pendingCustomMarker = null;
 let markersReloadHandle = null;
-let didInitialCenter = false;
 
 function setAddMarkerStatus(text, isError = false) {
   const status = document.getElementById('addMarkerStatus');
@@ -182,16 +181,7 @@ async function loadMarkers() {
 
   markersLayer.clearLayers();
 
-  let frhsLatLng = null;
-
   (data || []).forEach((m) => {
-
-    if (!frhsLatLng) {
-      const t = (m.title == null) ? '' : String(m.title).trim();
-      if (t && t.toUpperCase() === 'FRHS') {
-        frhsLatLng = [m.lat, m.lng];
-      }
-    }
 
     const icon = L.divIcon({
       className: "",
@@ -220,12 +210,6 @@ async function loadMarkers() {
       <button onclick="deleteMarker('${m.id}')">Delete</button>` : ''}
     `);
   });
-
-  // Center once on initial load to avoid fighting the user while panning/zooming.
-  if (!didInitialCenter && frhsLatLng) {
-    didInitialCenter = true;
-    map.setView(frhsLatLng, map.getZoom(), { animate: false });
-  }
 }
 
 function beginAddCustomMarker() {
