@@ -35,6 +35,14 @@
       box-sizing: border-box;
       font-size: 16px; /* prevents iOS Safari zoom */
     }
+    textarea {
+      width: 100%;
+      margin-bottom: 8px;
+      padding: 10px;
+      box-sizing: border-box;
+      font-size: 16px;
+      resize: vertical;
+    }
     button {
       width: 100%;
       margin-bottom: 8px;
@@ -66,7 +74,7 @@
     <b id="playerLabel"></b>
     <button onclick="logout()">Logout</button>
     <input id="markerTitleInput" placeholder="Marker title (optional)">
-    <textarea id="markerDescInput" placeholder="Description (optional)" rows="2" style="width:100%;margin-bottom:8px;padding:10px;box-sizing:border-box;font-size:16px;resize:vertical;"></textarea>
+    <textarea id="markerDescInput" placeholder="Description (optional)" rows="2"></textarea>
     <input id="markerColorInput" type="color" value="#ff0000">
     <button onclick="beginAddCustomMarker()">Add Marker</button>
     <div id="addMarkerStatus" style="font-size:12px;color:#555;margin-bottom:6px;"></div>
@@ -78,9 +86,24 @@
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="supabase-config.js"></script>
+<script src="supabase-config.js?v=20260227-1"></script>
 
 <script>
+const APP_VERSION = '20260227-1';
+
+// Helps Safari/GitHub Pages caching: ensure a version query exists.
+(function ensureVersionQuery() {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.get('v')) {
+      url.searchParams.set('v', APP_VERSION);
+      window.location.replace(url.toString());
+    }
+  } catch {
+    // ignore
+  }
+})();
+
 const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 
 let session = null;
@@ -112,7 +135,7 @@ function escapeHtml(text) {
 async function logout() {
   await sb.auth.signOut();
   localStorage.removeItem('currentUser');
-  window.location.href = 'login.html';
+  window.location.href = `login.html?v=${encodeURIComponent(APP_VERSION)}`;
 }
 
 var map = L.map('map', { zoomControl: false }).setView([40.5853, -105.0844], 13); // Fort Collins
@@ -130,7 +153,7 @@ async function initAuth() {
   }
   session = data.session;
   if (!session) {
-    window.location.href = 'login.html';
+    window.location.href = `login.html?v=${encodeURIComponent(APP_VERSION)}`;
     return;
   }
 
@@ -212,7 +235,7 @@ async function saveMarker(lat, lng, options = null) {
 
   if (!session) {
     setAddMarkerStatus('Session expired. Please log in again.', true);
-    window.location.href = 'login.html';
+    window.location.href = `login.html?v=${encodeURIComponent(APP_VERSION)}`;
     return false;
   }
 

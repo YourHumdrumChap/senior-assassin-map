@@ -68,10 +68,24 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="supabase-config.js"></script>
+<script src="supabase-config.js?v=20260227-1"></script>
 
 <script>
-const mapPage = 'War map.html';
+const APP_VERSION = '20260227-1';
+const mapPage = `War map.html?v=${encodeURIComponent(APP_VERSION)}`;
+
+// Helps Safari/GitHub Pages caching: ensure a version query exists.
+(function ensureVersionQuery() {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.get('v')) {
+      url.searchParams.set('v', APP_VERSION);
+      window.location.replace(url.toString());
+    }
+  } catch {
+    // ignore
+  }
+})();
 
 const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 
