@@ -101,6 +101,11 @@
       <button id="addMarkerBtn" onclick="beginAddCustomMarker()">Add Marker</button>
       <button id="saveEditsBtn" onclick="saveMarkerEdits()" style="display:none;">Save Changes</button>
       <button id="cancelEditsBtn" onclick="cancelMarkerEdits()" style="display:none;">Cancel Edit</button>
+
+      <div style="margin:10px 0 6px 0;font-weight:700;">Color Key</div>
+      <div id="colorKeyList"></div>
+      <button id="addColorKeyBtn" type="button" onclick="addColorKey()">Add Key</button>
+      <div id="colorKeyStatus" style="font-size:12px;color:#555;margin-top:6px;"></div>
     </div>
   </div>
 </div>
@@ -130,6 +135,8 @@ const APP_VERSION = '20260227-1';
 
 const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 
+const LABEL_MIN_ZOOM = 13; // hide marker title labels when zoomed out below this
+
 let session = null;
 let currentUser = null;
 let pendingCustomMarker = null;
@@ -137,6 +144,15 @@ let markersReloadHandle = null;
 let markersById = new Map();
 let editingMarkerId = null;
 let didCenterOnFRHS = false;
+let labelTooltips = [];
+let colorKeyItems = [];
+
+function setColorKeyStatus(text, isError = false) {
+  const el = document.getElementById('colorKeyStatus');
+  if (!el) return;
+  el.style.color = isError ? '#b00020' : '#555';
+  el.innerText = text || '';
+}
 
 function setMenuCollapsed(collapsed) {
   const panel = document.getElementById('controlPanel');
@@ -164,6 +180,20 @@ function setAddMarkerStatus(text, isError = false) {
 function scheduleReloadMarkers() {
   if (markersReloadHandle) clearTimeout(markersReloadHandle);
   markersReloadHandle = setTimeout(loadMarkers, 150);
+}
+
+function updateLabelVisibility() {
+  const show = map.getZoom() >= LABEL_MIN_ZOOM;
+  (labelTooltips || []).forEach((tt) => {
+    if (!tt) return;
+    try {
+      if (typeof tt.setOpacity === 'function') tt.setOpacity(show ? 1 : 0);
+      const el = (typeof tt.getElement === 'function') ? tt.getElement() : null;
+      if (el) el.style.display = show ? '' : 'none';
+    } catch {
+      // ignore
+    }
+  });
 }
 
 function setEditMode(markerId) {
@@ -205,6 +235,8 @@ async function logout() {
 }
 
 var map = L.map('map', { zoomControl: false }).setView([40.5853, -105.0844], 13); // Fort Collins
+
+map.on('zoomend', updateLabelVisibility);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors'
@@ -248,6 +280,7 @@ async function loadMarkers() {
   markersLayer.clearLayers();
 
   markersById = new Map();
+  labelTooltips = [];
 
   if (!didCenterOnFRHS) {
     const frhs = (data || []).find((m) => m && m.title === 'FRHS' && typeof m.lat === 'number' && typeof m.lng === 'number');
@@ -276,6 +309,9 @@ async function loadMarkers() {
         direction: 'top',
         offset: [0, -6]
       });
+
+      const tt = marker.getTooltip ? marker.getTooltip() : null;
+      if (tt) labelTooltips.push(tt);
     }
 
     const canEdit = session && m.user_id === session.user.id;
@@ -290,6 +326,135 @@ async function loadMarkers() {
       <button onclick="deleteMarker('${m.id}')">Delete</button>` : ''}
     `);
   });
+
+  // Ensure visibility is correct after tooltips are attached
+  setTimeout(updateLabelVisibility, 0);
+}
+
+async function loadColorKey() {
+  const { data, error } = await sb
+    .schema('public')
+    .from('color_key')
+    .select('id,label,color,created_at,updated_at')
+    .order('label', { ascending: true });
+
+  if (error) {
+    console.warn(error);
+    setColorKeyStatus(`Failed to load color key: ${error.message}`, true);
+    return;
+  }
+
+  colorKeyItems = data || [];
+  renderColorKey();
+  setColorKeyStatus('');
+}
+
+function renderColorKey() {
+  const host = document.getElementById('colorKeyList');
+  if (!host) return;
+
+  host.innerHTML = '';
+
+  if (!colorKeyItems.length) {
+    const empty = document.createElement('div');
+    empty.style.fontSize = '12px';
+    empty.style.color = '#555';
+    empty.style.marginBottom = '8px';
+    empty.innerText = 'No key entries yet.';
+    host.appendChild(empty);
+    return;
+  }
+
+  colorKeyItems.forEach((item) => {
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '8px';
+    row.style.alignItems = 'center';
+    row.style.marginBottom = '8px';
+
+    const color = document.createElement('input');
+    color.type = 'color';
+    color.value = item.color || '#ff0000';
+    color.style.width = '56px';
+    color.style.padding = '0';
+    color.style.height = '38px';
+
+    const label = document.createElement('input');
+    label.type = 'text';
+    label.placeholder = 'Label';
+    label.value = item.label || '';
+    label.style.flex = '1';
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.innerText = 'Del';
+    del.style.width = '64px';
+    del.style.marginBottom = '0';
+    del.onclick = () => deleteColorKey(item.id);
+
+    const scheduleSave = () => upsertColorKey(item.id, label.value, color.value);
+    label.onchange = scheduleSave;
+    color.onchange = scheduleSave;
+
+    row.appendChild(color);
+    row.appendChild(label);
+    row.appendChild(del);
+    host.appendChild(row);
+  });
+}
+
+async function addColorKey() {
+  if (!session) {
+    alert('Please login first');
+    return;
+  }
+
+  const { data, error } = await sb
+    .schema('public')
+    .from('color_key')
+    .insert({ label: 'New', color: '#ff0000' })
+    .select('id,label,color,created_at,updated_at')
+    .single();
+
+  if (error) {
+    console.warn(error);
+    setColorKeyStatus(error.message, true);
+    return;
+  }
+
+  colorKeyItems.push(data);
+  renderColorKey();
+}
+
+async function upsertColorKey(id, label, color) {
+  if (!session) return;
+
+  const cleanLabel = String(label || '').trim();
+  const cleanColor = String(color || '').trim() || '#ff0000';
+  if (!cleanLabel) return;
+
+  const { error } = await sb
+    .schema('public')
+    .from('color_key')
+    .update({ label: cleanLabel, color: cleanColor, updated_at: new Date().toISOString() })
+    .eq('id', id);
+
+  if (error) {
+    console.warn(error);
+    setColorKeyStatus(error.message, true);
+  }
+}
+
+async function deleteColorKey(id) {
+  if (!session) return;
+  const { error } = await sb.schema('public').from('color_key').delete().eq('id', id);
+  if (error) {
+    console.warn(error);
+    setColorKeyStatus(error.message, true);
+    return;
+  }
+  colorKeyItems = colorKeyItems.filter((x) => x.id !== id);
+  renderColorKey();
 }
 
 function beginAddCustomMarker() {
@@ -459,6 +624,9 @@ async function initRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'markers' }, () => {
       scheduleReloadMarkers();
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'color_key' }, () => {
+      loadColorKey();
+    })
     .subscribe();
 }
 
@@ -474,6 +642,7 @@ async function initRealtime() {
   }
   await initAuth();
   await loadMarkers();
+  await loadColorKey();
   await initRealtime();
 })();
 

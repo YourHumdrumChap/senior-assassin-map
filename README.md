@@ -27,6 +27,7 @@ For local testing (opening the file directly or via a local server), set `defaul
 
 - Markers are stored in the Supabase table `public.markers`.
 - Marker fields include: `title` and optional `description`.
+- A shared legend is stored in `public.color_key`.
 - Realtime subscriptions keep the map updated across devices.
 
 ## Teammate logins

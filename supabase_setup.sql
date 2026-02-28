@@ -73,6 +73,40 @@ using (auth.uid() = user_id);
 -- In the Dashboard, enable Realtime for this table if needed.
 alter publication supabase_realtime add table public.markers;
 
+-- 4b) Shared editable color key (legend)
+create table if not exists public.color_key (
+  id uuid primary key default gen_random_uuid(),
+  label text not null,
+  color text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Re-use the same updated_at trigger function
+drop trigger if exists trg_color_key_updated_at on public.color_key;
+create trigger trg_color_key_updated_at
+before update on public.color_key
+for each row
+execute function public.set_updated_at();
+
+alter table public.color_key enable row level security;
+
+drop policy if exists "Color key is readable by everyone" on public.color_key;
+create policy "Color key is readable by everyone"
+on public.color_key for select
+to anon, authenticated
+using (true);
+
+drop policy if exists "Authenticated users can edit color key" on public.color_key;
+create policy "Authenticated users can edit color key"
+on public.color_key for all
+to authenticated
+using (true)
+with check (true);
+
+-- Optional but recommended for live updates
+alter publication supabase_realtime add table public.color_key;
+
 -- 5) User profiles (user_id + username)
 -- Supabase Auth stores passwords securely (hashed) and does NOT allow reading them back.
 -- This table is the safe way to keep a list of teammates and their user IDs.
